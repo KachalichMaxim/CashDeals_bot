@@ -25,3 +25,4 @@ def parse_deal_id_from_form_data(row_data: dict) -> Optional[str]:
     
     return None
 
+

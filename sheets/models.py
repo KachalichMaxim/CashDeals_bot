@@ -99,3 +99,43 @@ class Deal:
             return config.STAGE_RECEIVED_BY_MANAGER
         return None
 
+
+@dataclass
+class RentalObject:
+    """Модель объекта аренды из справочника М/М"""
+    legal_entity: str  # Юр.лицо
+    address: str  # Адрес
+    mm_number: str  # М/М
+    # Дата следующего платежа (DD.MM.YY или пусто)
+    next_payment_date: Optional[str] = None
+    payment_amount: Optional[float] = None  # Платеж по аренде
+    responsible: Optional[str] = None  # Ответственный
+    # Оплачено в текущем месяце (TRUE/FALSE)
+    paid_this_month: Optional[bool] = None
+    row_index: Optional[int] = None  # Индекс строки в таблице
+
+    def is_payment_due(self) -> bool:
+        """Проверка, нужно ли оплачивать (дата <= сегодня)"""
+        if not self.next_payment_date or not self.next_payment_date.strip():
+            return False  # Игнорируем объекты с пустой датой
+
+        try:
+            from datetime import datetime
+            # Парсим дату формата DD.MM.YY или DD.MM.YYYY
+            date_str = self.next_payment_date.strip()
+            if len(date_str.split('.')) == 3:
+                parts = date_str.split('.')
+                day = int(parts[0])
+                month = int(parts[1])
+                year = int(parts[2])
+                if year < 100:
+                    year += 2000  # Преобразуем YY в YYYY
+                payment_date = datetime(year, month, day)
+                today = datetime.now().replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                return payment_date <= today
+        except Exception:
+            pass
+        return False
+

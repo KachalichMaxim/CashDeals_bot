@@ -69,3 +69,4 @@ def filter_deals_by_role(deals: List[Deal], user_role: UserRole) -> List[Deal]:
     # Для менеджера и ассистента - только их сделки (нужно добавить фильтрацию)
     return deals
 
+

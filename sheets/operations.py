@@ -5,7 +5,7 @@ from datetime import datetime
 import logging
 
 from sheets.client import get_client
-from sheets.models import Deal, CashFlowEvent, UserRole
+from sheets.models import Deal, CashFlowEvent, UserRole, RentalObject
 import config
 
 logger = logging.getLogger(__name__)
@@ -617,3 +617,231 @@ def calculate_discrepancies(deal_id: str) -> Dict[str, float]:
             discrepancies["owner"] = diff
     
     return discrepancies
+
+
+# Индексы колонок в листе "Справочник М/М"
+RENTAL_COL_LEGAL_ENTITY = 0  # Юр.лицо
+RENTAL_COL_ADDRESS = 1  # Адрес
+RENTAL_COL_MM = 2  # М/М
+RENTAL_COL_NEXT_PAYMENT_DATE = 3  # Дата следующего платежа
+RENTAL_COL_PAYMENT_AMOUNT = 4  # Платеж по аренде
+RENTAL_COL_RESPONSIBLE = 5  # Ответственный
+RENTAL_COL_PAID_THIS_MONTH = 6  # Оплачено в текущем месяце
+
+
+def get_rental_objects_for_employee(employee_name: str) -> List[RentalObject]:
+    """Получение объектов аренды для сотрудника"""
+    try:
+        client = get_client()
+        try:
+            worksheet = client.get_worksheet(config.SHEET_RENTAL_REFERENCE)
+        except Exception:
+            logger.warning(f"Лист '{config.SHEET_RENTAL_REFERENCE}' не найден")
+            return []
+        
+        all_values = worksheet.get_all_values()
+        if not all_values or len(all_values) < 2:
+            return []
+        
+        rental_objects = []
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) <= RENTAL_COL_RESPONSIBLE:
+                continue
+            
+            responsible = str(row[RENTAL_COL_RESPONSIBLE]).strip() if len(row) > RENTAL_COL_RESPONSIBLE else ""
+            if responsible.lower() != employee_name.lower():
+                continue
+            
+            # Пропускаем объекты с пустой датой
+            next_payment_date = str(row[RENTAL_COL_NEXT_PAYMENT_DATE]).strip() if len(row) > RENTAL_COL_NEXT_PAYMENT_DATE else ""
+            if not next_payment_date:
+                continue
+            
+            legal_entity = str(row[RENTAL_COL_LEGAL_ENTITY]).strip() if len(row) > RENTAL_COL_LEGAL_ENTITY else ""
+            address = str(row[RENTAL_COL_ADDRESS]).strip() if len(row) > RENTAL_COL_ADDRESS else ""
+            mm_number = str(row[RENTAL_COL_MM]).strip() if len(row) > RENTAL_COL_MM else ""
+            
+            payment_amount_str = str(row[RENTAL_COL_PAYMENT_AMOUNT]).strip() if len(row) > RENTAL_COL_PAYMENT_AMOUNT else ""
+            payment_amount = None
+            if payment_amount_str:
+                try:
+                    # Убираем пробелы и заменяем запятую на точку
+                    payment_amount = float(payment_amount_str.replace(",", ".").replace(" ", ""))
+                except (ValueError, AttributeError):
+                    pass
+            
+            paid_this_month_str = str(row[RENTAL_COL_PAID_THIS_MONTH]).strip().lower() if len(row) > RENTAL_COL_PAID_THIS_MONTH else ""
+            paid_this_month = None
+            if paid_this_month_str in ["true", "да", "1", "yes"]:
+                paid_this_month = True
+            elif paid_this_month_str in ["false", "нет", "0", "no"]:
+                paid_this_month = False
+            
+            rental_obj = RentalObject(
+                legal_entity=legal_entity,
+                address=address,
+                mm_number=mm_number,
+                next_payment_date=next_payment_date,
+                payment_amount=payment_amount,
+                responsible=responsible,
+                paid_this_month=paid_this_month,
+                row_index=idx
+            )
+            
+            rental_objects.append(rental_obj)
+        
+        # Сортируем по дате (от меньшей к большей)
+        def parse_date(date_str: str) -> datetime:
+            """Парсинг даты формата DD.MM.YY"""
+            if not date_str or not date_str.strip():
+                return datetime.max  # Пустые даты в конец
+            try:
+                parts = date_str.strip().split('.')
+                if len(parts) == 3:
+                    day = int(parts[0])
+                    month = int(parts[1])
+                    year = int(parts[2])
+                    if year < 100:
+                        year += 2000
+                    return datetime(year, month, day)
+            except Exception:
+                pass
+            return datetime.max
+        
+        rental_objects.sort(key=lambda x: parse_date(x.next_payment_date) if x.next_payment_date else datetime.max)
+        
+        return rental_objects
+    
+    except Exception as e:
+        logger.error(f"Ошибка при получении объектов аренды для {employee_name}: {e}")
+        return []
+
+
+def update_rental_payment_date(address: str, mm_number: str, payment_date: datetime) -> bool:
+    """Обновление даты следующего платежа после оплаты (+30 дней)"""
+    try:
+        client = get_client()
+        worksheet = client.get_worksheet(config.SHEET_RENTAL_REFERENCE)
+        all_values = worksheet.get_all_values()
+        
+        if not all_values or len(all_values) < 2:
+            return False
+        
+        # Ищем строку с нужным адресом и М/М
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) <= max(RENTAL_COL_ADDRESS, RENTAL_COL_MM):
+                continue
+            
+            row_address = str(row[RENTAL_COL_ADDRESS]).strip() if len(row) > RENTAL_COL_ADDRESS else ""
+            row_mm = str(row[RENTAL_COL_MM]).strip() if len(row) > RENTAL_COL_MM else ""
+            
+            if row_address.lower() == address.lower() and row_mm.lower() == mm_number.lower():
+                # Вычисляем следующую дату платежа (+30 дней от даты оплаты)
+                from datetime import timedelta
+                next_payment = payment_date + timedelta(days=30)
+                next_payment_str = next_payment.strftime("%d.%m.%y")
+                
+                # Обновляем дату следующего платежа
+                worksheet.update_cell(idx, RENTAL_COL_NEXT_PAYMENT_DATE + 1, next_payment_str)
+                logger.info(f"Обновлена дата следующего платежа для {address}/{mm_number}: {next_payment_str}")
+                return True
+        
+        logger.warning(f"Объект аренды {address}/{mm_number} не найден в справочнике")
+        return False
+    
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении даты платежа для {address}/{mm_number}: {e}")
+        return False
+
+
+def get_rental_addresses_for_employee(employee_name: str) -> List[str]:
+    """Получение уникальных адресов для сотрудника из объектов аренды"""
+    rental_objects = get_rental_objects_for_employee(employee_name)
+    addresses = list(set([obj.address for obj in rental_objects if obj.address]))
+    return sorted(addresses)
+
+
+def get_rental_mm_for_address(employee_name: str, address: str) -> List[RentalObject]:
+    """Получение М/М для конкретного адреса сотрудника"""
+    rental_objects = get_rental_objects_for_employee(employee_name)
+    return [obj for obj in rental_objects if obj.address.lower() == address.lower()]
+
+
+def get_rental_mm_without_payments(employee_name: str) -> Dict[str, List[RentalObject]]:
+    """Получение М/М по адресам, по которым не было поступлений в текущем месяце"""
+    rental_objects = get_rental_objects_for_employee(employee_name)
+    
+    # Фильтруем только те, где paid_this_month != True (т.е. False или None)
+    unpaid_objects = [obj for obj in rental_objects if obj.paid_this_month is not True]
+    
+    # Группируем по адресам
+    result = {}
+    for obj in unpaid_objects:
+        if obj.address not in result:
+            result[obj.address] = []
+        result[obj.address].append(obj)
+    
+    return result
+
+
+def add_transaction_to_employee_sheet(employee_name: str, date: datetime, amount: float, 
+                                       category: str, transaction_type: str, description: str,
+                                       address: str = None, mm_number: str = None) -> bool:
+    """Добавление транзакции в лист сотрудника"""
+    try:
+        client = get_client()
+        try:
+            worksheet = client.get_worksheet(employee_name)
+        except Exception:
+            # Если лист не существует, создаем его на основе шаблона
+            logger.info(f"Лист '{employee_name}' не найден, создаем на основе шаблона")
+            template_worksheet = client.get_worksheet(config.SHEET_EMPLOYEE_TEMPLATE)
+            template_values = template_worksheet.get_all_values()
+            
+            # Создаем новый лист
+            spreadsheet = client.open_by_key(config.GOOGLE_SHEETS_ID)
+            worksheet = spreadsheet.add_worksheet(title=employee_name, rows=1000, cols=20)
+            
+            # Копируем заголовки из шаблона
+            if template_values:
+                worksheet.insert_row(template_values[0], 1)
+            
+            # Добавляем имя сотрудника в ячейку M1
+            worksheet.update_cell(1, 13, employee_name)  # M1 = колонка 13
+        
+        # Получаем все значения для определения следующей строки
+        all_values = worksheet.get_all_values()
+        
+        # Находим следующую пустую строку после заголовков
+        next_row = len(all_values) + 1
+        if len(all_values) == 0:
+            # Если лист пустой, добавляем заголовки
+            headers = ["Дата", "Поступление (+)", "Списание (-)", "Категория", "Тип", "Описание", "Остаток", "Адрес", "М/М"]
+            worksheet.insert_row(headers, 1)
+            worksheet.update_cell(1, 13, employee_name)  # M1 = колонка 13
+            next_row = 2
+        
+        # Форматируем дату
+        date_str = date.strftime("%d.%m.%Y")
+        
+        # Определяем колонки
+        # Дата, Поступление (+), Списание (-), Категория, Тип, Описание, Остаток, Адрес, М/М
+        row_data = [
+            date_str,  # Дата
+            amount if amount > 0 else "",  # Поступление (+)
+            abs(amount) if amount < 0 else "",  # Списание (-)
+            category,  # Категория
+            transaction_type,  # Тип
+            description,  # Описание
+            "",  # Остаток (будет вычислен формулой)
+            address or "",  # Адрес
+            mm_number or ""  # М/М
+        ]
+        
+        worksheet.insert_row(row_data, next_row)
+        logger.info(f"Добавлена транзакция в лист '{employee_name}': {category} - {amount}")
+        return True
+    
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении транзакции в лист '{employee_name}': {e}")
+        return False
