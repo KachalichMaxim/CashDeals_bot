@@ -1,7 +1,7 @@
 """Обработчики для Telegram бота"""
 import logging
 from typing import Dict
-from telegram import Update, InlineKeyboardButton
+from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -13,10 +13,7 @@ from telegram.ext import (
 
 from sheets.operations import (
     get_user_role, get_cashflow_history, add_user_to_roles,
-    update_deal_status_with_role, get_rental_objects_for_employee,
-    get_rental_addresses_for_employee, get_rental_mm_for_address,
-    update_rental_payment_date, add_transaction_to_employee_sheet,
-    get_rental_mm_without_payments
+    update_deal_status_with_role
 )
 from utils.cache import (
     get_cached_user_deals, get_cached_user_role, invalidate_cache,
@@ -33,9 +30,7 @@ from bot.keyboards import (
     get_deal_detail_keyboard,
     get_cancel_keyboard,
     get_transfer_recipient_keyboard,
-    get_amount_confirmation_keyboard,
-    get_rental_add_payment_keyboard,
-    get_rental_mm_keyboard
+    get_amount_confirmation_keyboard
 )
 from bot.messages import (
     get_welcome_message,
@@ -45,8 +40,7 @@ from bot.messages import (
     get_stage_confirmation_message,
     get_error_message,
     get_success_message,
-    get_debt_summary_message,
-    get_rental_list_message
+    get_debt_summary_message
 )
 import config
 
@@ -71,14 +65,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_role_obj = get_cached_user_role(telegram_id)
         role = user_role_obj.role if user_role_obj else config.ROLE_NULL
         
-        # Проверяем наличие объектов аренды для сотрудника
-        has_rental_objects = False
-        if user_role_obj and user_role_obj.predstavites:
-            rental_objects = get_rental_objects_for_employee(user_role_obj.predstavites)
-            has_rental_objects = len(rental_objects) > 0
-        
         message = get_welcome_message(user_name, role)
-        keyboard = get_main_menu_keyboard(has_rental_objects=has_rental_objects)
+        keyboard = get_main_menu_keyboard()
         
         await update.message.reply_text(message, reply_markup=keyboard)
     
@@ -111,20 +99,14 @@ async def my_deals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_role_obj.is_owner():
             debt_summary = get_debt_summary()
         
-        # Проверяем наличие объектов аренды
-        has_rental_objects = False
-        if user_role_obj and user_role_obj.predstavites:
-            rental_objects = get_rental_objects_for_employee(user_role_obj.predstavites)
-            has_rental_objects = len(rental_objects) > 0
-        
         if not deals:
             if debt_summary:
                 message = get_debt_summary_message(debt_summary)
-                keyboard = get_main_menu_keyboard(has_rental_objects=has_rental_objects)
+                keyboard = get_main_menu_keyboard()
                 await update.message.reply_text(message, reply_markup=keyboard)
                 return
             message = "У вас пока нет сделок."
-            keyboard = get_main_menu_keyboard(has_rental_objects=has_rental_objects)
+            keyboard = get_main_menu_keyboard()
             await update.message.reply_text(message, reply_markup=keyboard)
             return
         
@@ -164,13 +146,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if data == "main_menu":
             user_name = user.full_name or user.username or "Пользователь"
-            # Проверяем наличие объектов аренды
-            has_rental_objects = False
-            if user_role_obj and user_role_obj.predstavites:
-                rental_objects = get_rental_objects_for_employee(user_role_obj.predstavites)
-                has_rental_objects = len(rental_objects) > 0
             message = get_welcome_message(user_name, user_role_obj.role)
-            keyboard = get_main_menu_keyboard(has_rental_objects=has_rental_objects)
+            keyboard = get_main_menu_keyboard()
             await query.edit_message_text(message, reply_markup=keyboard)
         
         elif data == "my_deals":
@@ -184,19 +161,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if user_role_obj.is_owner():
                 debt_summary = get_debt_summary()
             
-            # Проверяем наличие объектов аренды
-            has_rental_objects = False
-            if user_role_obj and user_role_obj.predstavites:
-                rental_objects = get_rental_objects_for_employee(user_role_obj.predstavites)
-                has_rental_objects = len(rental_objects) > 0
-            
             if not deals:
                 if debt_summary:
                     message = get_debt_summary_message(debt_summary)
-                    keyboard = get_main_menu_keyboard(has_rental_objects=has_rental_objects)
+                    keyboard = get_main_menu_keyboard()
                     await query.edit_message_text(message, reply_markup=keyboard)
                     return
-                keyboard = get_main_menu_keyboard(has_rental_objects=has_rental_objects)
+                keyboard = get_main_menu_keyboard()
                 try:
                     await query.edit_message_text("У вас пока нет сделок.", reply_markup=keyboard)
                 except Exception:
@@ -597,7 +568,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             context_data = user_context[user_id]
-            action = context_data.get("action", "deal_payment")
+            deal_id = context_data["deal_id"]
+            stage = context_data["stage"]
+            user_role_obj = context_data["user_role"]
+            telegram_id = context_data["telegram_id"]
+            user_name = context_data["user_name"]
             amount = context_data.get("amount")
             
             # Проверяем, что сумма совпадает с хешем
@@ -616,89 +591,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if user_id in user_context:
                     del user_context[user_id]
                 return
-            
-            if action == "rental_payment":
-                # Обработка оплаты аренды
-                address = context_data.get("address", "")
-                mm_number = context_data.get("mm_number", "")
-                employee_name = context_data.get("employee_name", "")
-                mm_object = context_data.get("mm_object")
-                
-                if not address or not mm_number or not employee_name:
-                    keyboard = get_main_menu_keyboard()
-                    try:
-                        await query.edit_message_text(
-                            "Ошибка: не найдены данные об объекте аренды.",
-                            reply_markup=keyboard
-                        )
-                    except Exception:
-                        await query.message.reply_text(
-                            "Ошибка: не найдены данные об объекте аренды.",
-                            reply_markup=keyboard
-                        )
-                    if user_id in user_context:
-                        del user_context[user_id]
-                    return
-                
-                # Добавляем транзакцию в лист сотрудника
-                from datetime import datetime
-                success = add_transaction_to_employee_sheet(
-                    employee_name=employee_name,
-                    date=datetime.now(),
-                    amount=amount,
-                    category="Доходы от аренды",
-                    transaction_type="Поступление",
-                    description=f"Оплата аренды {address} М/М {mm_number}",
-                    address=address,
-                    mm_number=mm_number
-                )
-                
-                if success and mm_object:
-                    # Обновляем дату следующего платежа (+30 дней)
-                    update_rental_payment_date(address, mm_number, datetime.now())
-                    invalidate_cache()
-                    
-                    message = (
-                        f"✅ Оплата аренды добавлена!\n\n"
-                        f"Адрес: {address}\n"
-                        f"М/М: {mm_number}\n"
-                        f"Сумма: {amount:,.2f} ₽\n"
-                        f"Дата следующего платежа обновлена (+30 дней)"
-                    ).replace(",", " ")
-                    
-                    # Возвращаемся в меню аренды
-                    rental_objects = get_rental_objects_for_employee(employee_name)
-                    addresses = get_rental_addresses_for_employee(employee_name)
-                    keyboard = get_rental_add_payment_keyboard(addresses)
-                    keyboard.keyboard.append([InlineKeyboardButton("↩ Главное меню", callback_data="main_menu")])
-                    
-                    try:
-                        await query.edit_message_text(message, reply_markup=keyboard)
-                    except Exception:
-                        await query.message.reply_text(message, reply_markup=keyboard)
-                else:
-                    keyboard = get_main_menu_keyboard()
-                    try:
-                        await query.edit_message_text(
-                            "Ошибка при добавлении оплаты аренды.",
-                            reply_markup=keyboard
-                        )
-                    except Exception:
-                        await query.message.reply_text(
-                            "Ошибка при добавлении оплаты аренды.",
-                            reply_markup=keyboard
-                        )
-                
-                if user_id in user_context:
-                    del user_context[user_id]
-                return
-            
-            # Обработка обычной сделки
-            deal_id = context_data["deal_id"]
-            stage = context_data["stage"]
-            user_role_obj = context_data["user_role"]
-            telegram_id = context_data["telegram_id"]
-            user_name = context_data["user_name"]
             
             # Сохраняем событие
             success = process_stage_transition(
@@ -887,7 +779,9 @@ async def handle_amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     context_data = user_context[user_id]
-    action = context_data.get("action", "deal_payment")
+    deal_id = context_data["deal_id"]
+    stage = context_data["stage"]
+    user_role_obj = context_data["user_role"]
     
     try:
         amount_str = update.message.text
@@ -906,37 +800,20 @@ async def handle_amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Показываем подтверждение суммы
         from bot.messages import format_currency
         
-        if action == "rental_payment":
-            # Обработка оплаты аренды
-            address = context_data.get("address", "")
-            mm_number = context_data.get("mm_number", "")
-            
-            message = (
-                f"📝 Подтверждение оплаты аренды\n\n"
-                f"Адрес: {address}\n"
-                f"М/М: {mm_number}\n"
-                f"Введенная сумма: {format_currency(amount)}\n\n"
-                f"Подтвердите введенную сумму:"
-            )
-        else:
-            # Обработка обычной сделки
-            deal_id = context_data["deal_id"]
-            stage = context_data["stage"]
-            
-            stage_names = {
-                config.STAGE_TRANSFERRED_TO_ASSISTANT: "передачи ассистенту",
-                config.STAGE_ACCEPTED_BY_ASSISTANT: "получения от менеджера",
-                config.STAGE_TRANSFERRED_TO_OWNER: "передачи собственнику",
-                config.STAGE_ACCEPTED_BY_OWNER: "получения",
-            }
-            stage_name = stage_names.get(stage, stage)
-            
-            message = (
-                f"📝 Подтверждение {stage_name}\n\n"
-                f"Сделка: {deal_id}\n"
-                f"Введенная сумма: {format_currency(amount)}\n\n"
-                f"Подтвердите введенную сумму:"
-            )
+        stage_names = {
+            config.STAGE_TRANSFERRED_TO_ASSISTANT: "передачи ассистенту",
+            config.STAGE_ACCEPTED_BY_ASSISTANT: "получения от менеджера",
+            config.STAGE_TRANSFERRED_TO_OWNER: "передачи собственнику",
+            config.STAGE_ACCEPTED_BY_OWNER: "получения",
+        }
+        stage_name = stage_names.get(stage, stage)
+        
+        message = (
+            f"📝 Подтверждение {stage_name}\n\n"
+            f"Сделка: {deal_id}\n"
+            f"Введенная сумма: {format_currency(amount)}\n\n"
+            f"Подтвердите введенную сумму:"
+        )
         
         keyboard = get_amount_confirmation_keyboard(amount)
         await update.message.reply_text(message, reply_markup=keyboard)

@@ -225,42 +225,6 @@ def get_cashflow_chain_message(deal_id: str, summary: Dict) -> str:
     return message
 
 
-def get_rental_list_message(rental_objects: List) -> str:
-    """Сообщение со списком объектов аренды"""
-    if not rental_objects:
-        return "У вас нет объектов аренды."
-    
-    message = "🏠 Предстоящие платежи по аренде:\n\n"
-    
-    for obj in rental_objects:
-        date_str = obj.next_payment_date if obj.next_payment_date else "Не указана"
-        amount_str = f"{obj.payment_amount:,.2f}".replace(",", " ") if obj.payment_amount else "Не указана"
-        paid_status = "✅" if obj.paid_this_month else "⏳"
-        
-        message += f"{paid_status} {obj.address} - М/М {obj.mm_number}\n"
-        message += f"   📅 Дата: {date_str}\n"
-        message += f"   💰 Сумма: {amount_str} ₽\n\n"
-    
-    return message
-
-
-def format_rental_table(rental_objects: List) -> str:
-    """Форматирование таблицы объектов аренды"""
-    if not rental_objects:
-        return "Нет объектов для отображения."
-    
-    # Формируем таблицу
-    table = "Адрес | М/М | Дата | Сумма\n"
-    table += "-" * 50 + "\n"
-    
-    for obj in rental_objects:
-        date_str = obj.next_payment_date if obj.next_payment_date else "—"
-        amount_str = f"{obj.payment_amount:,.2f}".replace(",", " ") if obj.payment_amount else "—"
-        table += f"{obj.address[:20]} | {obj.mm_number} | {date_str} | {amount_str} ₽\n"
-    
-    return table
-
-
 def get_cashflow_history_message(deal_id: str, events: List[CashFlowEvent]) -> str:
     """Сообщение с историей движения средств"""
     display_deal_id = deal_id[:50] + "..." if len(deal_id) > 50 else deal_id

@@ -16,8 +16,6 @@ GOOGLE_SERVICE_ACCOUNT_FILE = BASE_DIR / "tonal-concord-464913-u3-2024741e839c.j
 SHEET_MAIN = "Ответы на форму (1)"  # Основной лист со сделками
 SHEET_ROLES = "Роли"  # Таблица ролей (может быть на том же листе или отдельном)
 SHEET_CASHFLOW_LOG = "CashFlow_Log"  # Журнал операций
-SHEET_RENTAL_REFERENCE = "Справочник М/М"  # Справочник объектов аренды
-SHEET_EMPLOYEE_TEMPLATE = "Шаблон_Сотрудника"  # Шаблон листа сотрудника
 
 # Этапы движения наличных
 STAGE_RECEIVED_BY_MANAGER = "Получено менеджером"
@@ -46,5 +44,4 @@ ROLES = [ROLE_NULL, ROLE_MANAGER, ROLE_ASSISTANT, ROLE_OWNER]
 STATUS_DISCREPANCY = "Расхождение"
 STATUS_COMPLETE = "Завершено"
 STATUS_IN_PROGRESS = "В процессе"
-
 

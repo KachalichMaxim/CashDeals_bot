@@ -1,16 +1,13 @@
 """Клавиатуры для Telegram бота"""
-from typing import List
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import config
 
 
-def get_main_menu_keyboard(has_rental_objects: bool = False) -> InlineKeyboardMarkup:
+def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Главное меню"""
     keyboard = [
         [InlineKeyboardButton("Мои сделки", callback_data="my_deals")],
     ]
-    if has_rental_objects:
-        keyboard.append([InlineKeyboardButton("🏠 Аренда", callback_data="rental_menu")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -126,28 +123,5 @@ def get_amount_confirmation_keyboard(amount: float) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✅ Подтвердить сумму", callback_data=f"confirm_amount_{amount_hash}")],
         [InlineKeyboardButton("❌ Отмена", callback_data="cancel")]
     ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def get_rental_add_payment_keyboard(addresses: List[str]) -> InlineKeyboardMarkup:
-    """Клавиатура для добавления оплаты аренды (выбор адреса)"""
-    keyboard = []
-    for address in addresses:
-        # Используем хеш адреса для callback_data
-        address_hash = hash(address) % 1000000
-        keyboard.append([InlineKeyboardButton(f"📍 {address}", callback_data=f"rental_address_{address_hash}")])
-    keyboard.append([InlineKeyboardButton("↩ Назад", callback_data="rental_menu")])
-    return InlineKeyboardMarkup(keyboard)
-
-
-def get_rental_mm_keyboard(address: str, mm_objects: List) -> InlineKeyboardMarkup:
-    """Клавиатура для выбора М/М по адресу"""
-    keyboard = []
-    address_hash = hash(address) % 1000000
-    for mm_obj in mm_objects:
-        mm_hash = hash(f"{address}_{mm_obj.mm_number}") % 1000000
-        button_text = f"🏠 М/М {mm_obj.mm_number}"
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"rental_mm_{address_hash}_{mm_hash}")])
-    keyboard.append([InlineKeyboardButton("↩ Назад", callback_data="rental_menu")])
     return InlineKeyboardMarkup(keyboard)
 
