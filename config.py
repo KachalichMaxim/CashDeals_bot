@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).parent
 TELEGRAM_BOT_TOKEN = "8103210301:AAEqKjckjhDyeQAB-hVwcjN2tw-tBwXKLhw"
 
 # Google Sheets настройки
-GOOGLE_SHEETS_ID = "1FZm3cd_xD09IEPcxXtllYvnfxsoPnCLmvfr83GuADR8"
+GOOGLE_SHEETS_ID = "1-1eeWtQcFYYdpkjNWe53WgKN5XpxaCbrJPvw5EiCn1A"
 GOOGLE_SERVICE_ACCOUNT_FILE = BASE_DIR / "tonal-concord-464913-u3-2024741e839c.json"
 
 # Названия листов
