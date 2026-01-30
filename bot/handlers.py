@@ -52,31 +52,48 @@ user_context: Dict[int, Dict] = {}
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
+    logger.info("Команда /start получена")
     user = update.effective_user
     telegram_id = str(user.id)
+    logger.info(f"Пользователь: {telegram_id}, имя: {user.full_name or user.username}")
     
     try:
         user_name = user.full_name or user.username or "Пользователь"
+        logger.info(f"Обработка команды /start для пользователя {telegram_id}")
         
         # Автоматически добавляем пользователя в таблицу ролей (если его там нет)
-        add_user_to_roles(telegram_id, user_name)
+        try:
+            add_user_to_roles(telegram_id, user_name)
+            logger.info(f"Пользователь {telegram_id} добавлен/обновлен в таблице ролей")
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении пользователя в роли: {e}")
         
         # Получаем роль пользователя (используем кэш)
-        user_role_obj = get_cached_user_role(telegram_id)
-        role = user_role_obj.role if user_role_obj else config.ROLE_NULL
+        try:
+            user_role_obj = get_cached_user_role(telegram_id)
+            role = user_role_obj.role if user_role_obj else config.ROLE_NULL
+            logger.info(f"Роль пользователя {telegram_id}: {role}")
+        except Exception as e:
+            logger.error(f"Ошибка при получении роли: {e}")
+            role = config.ROLE_NULL
         
         message = get_welcome_message(user_name, role)
         keyboard = get_main_menu_keyboard()
+        logger.info(f"Отправка приветственного сообщения пользователю {telegram_id}")
         
         await update.message.reply_text(message, reply_markup=keyboard)
+        logger.info(f"Сообщение успешно отправлено пользователю {telegram_id}")
     
     except Exception as e:
-        logger.error(f"Ошибка в start_command: {e}")
-        error_msg = get_error_message(str(e))
-        if len(error_msg) > 4000:
-            error_msg = "❌ Произошла ошибка. Пожалуйста, попробуйте еще раз."
-        keyboard = get_main_menu_keyboard()
-        await update.message.reply_text(error_msg, reply_markup=keyboard)
+        logger.error(f"Ошибка в start_command: {e}", exc_info=True)
+        try:
+            error_msg = get_error_message(str(e))
+            if len(error_msg) > 4000:
+                error_msg = "❌ Произошла ошибка. Пожалуйста, попробуйте еще раз."
+            keyboard = get_main_menu_keyboard()
+            await update.message.reply_text(error_msg, reply_markup=keyboard)
+        except Exception as e2:
+            logger.error(f"Критическая ошибка при отправке сообщения об ошибке: {e2}")
 
 
 async def my_deals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
