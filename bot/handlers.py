@@ -644,12 +644,26 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             )
                 
                 # Получаем обновленную сводку по сделке
-                summary = get_deal_summary(deal_id)
+                try:
+                    summary = get_deal_summary(deal_id)
+                except Exception as e:
+                    logger.error(f"Ошибка при получении сводки по сделке: {e}")
+                    summary = {}
                 
                 # Показываем полную цепочку движения денег
                 from bot.messages import get_cashflow_chain_message
                 
-                message = get_cashflow_chain_message(deal_id, summary)
+                try:
+                    message = get_cashflow_chain_message(deal_id, summary)
+                except Exception as e:
+                    logger.error(f"Ошибка при формировании сообщения цепочки: {e}")
+                    from bot.messages import format_currency
+                    message = (
+                        f"✅ Успешно!\n\n"
+                        f"Сделка: {deal_id[:100]}\n"
+                        f"Сумма {format_currency(amount)} сохранена.\n\n"
+                        f"Используйте кнопку 'Мои сделки' для просмотра деталей."
+                    )
                 
                 # Добавляем кнопку "Главное меню"
                 keyboard = get_main_menu_keyboard()
@@ -663,9 +677,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.error(f"Ошибка при показе цепочки: {e}")
                     # Если сообщение слишком длинное, показываем краткую версию
                     from bot.messages import format_currency
+                    # Ограничиваем длину deal_id
+                    display_deal_id = deal_id[:100] + "..." if len(deal_id) > 100 else deal_id
                     short_message = (
                         f"✅ Успешно!\n\n"
-                        f"Сделка: {deal_id}\n"
+                        f"Сделка: {display_deal_id}\n"
                         f"Сумма {format_currency(amount)} сохранена.\n\n"
                         f"Используйте кнопку 'Мои сделки' для просмотра деталей."
                     )
@@ -692,9 +708,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         reply_markup=keyboard
                     )
             
-            # Очищаем контекст
-            if user_id in user_context:
-                del user_context[user_id]
+            # Очищаем контекст ПОСЛЕ успешного отображения сообщения
+            # Не очищаем сразу, чтобы избежать проблем при ошибках
+            try:
+                # Ждем немного, чтобы убедиться, что сообщение отправлено
+                import asyncio
+                await asyncio.sleep(0.5)
+            except Exception:
+                pass
+            finally:
+                if user_id in user_context:
+                    del user_context[user_id]
         
         elif data == "cancel":
             user_id = query.from_user.id
@@ -779,9 +803,20 @@ async def handle_amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     context_data = user_context[user_id]
-    deal_id = context_data["deal_id"]
-    stage = context_data["stage"]
-    user_role_obj = context_data["user_role"]
+    # Безопасное получение данных из контекста
+    deal_id = context_data.get("deal_id")
+    stage = context_data.get("stage")
+    user_role_obj = context_data.get("user_role")
+    
+    # Проверяем, что все необходимые данные есть
+    if not deal_id or not stage or not user_role_obj:
+        await update.message.reply_text(
+            "Ошибка: данные сессии повреждены. Начните заново.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        if user_id in user_context:
+            del user_context[user_id]
+        return
     
     # Проверяем, не введена ли уже сумма (чтобы избежать бесконечного цикла)
     if "amount" in context_data and context_data["amount"] is not None:
