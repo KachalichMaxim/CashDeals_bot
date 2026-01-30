@@ -788,6 +788,9 @@ async def handle_amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Сумма уже введена, показываем клавиатуру подтверждения снова
         from bot.messages import format_currency
         amount = context_data["amount"]
+        # Убеждаемся, что deal_id и stage правильные
+        deal_id = context_data.get("deal_id", "Неизвестно")
+        stage = context_data.get("stage", "")
         stage_names = {
             config.STAGE_TRANSFERRED_TO_ASSISTANT: "передачи ассистенту",
             config.STAGE_ACCEPTED_BY_ASSISTANT: "получения от менеджера",
@@ -795,9 +798,11 @@ async def handle_amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE
             config.STAGE_ACCEPTED_BY_OWNER: "получения",
         }
         stage_name = stage_names.get(stage, stage)
+        # Ограничиваем длину deal_id для отображения
+        display_deal_id = deal_id[:100] + "..." if len(deal_id) > 100 else deal_id
         message = (
             f"📝 Подтверждение {stage_name}\n\n"
-            f"Сделка: {deal_id}\n"
+            f"Сделка: {display_deal_id}\n"
             f"Введенная сумма: {format_currency(amount)}\n\n"
             f"Используйте кнопку подтверждения ниже:"
         )
