@@ -783,6 +783,28 @@ async def handle_amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     stage = context_data["stage"]
     user_role_obj = context_data["user_role"]
     
+    # Проверяем, не введена ли уже сумма (чтобы избежать бесконечного цикла)
+    if "amount" in context_data and context_data["amount"] is not None:
+        # Сумма уже введена, показываем клавиатуру подтверждения снова
+        from bot.messages import format_currency
+        amount = context_data["amount"]
+        stage_names = {
+            config.STAGE_TRANSFERRED_TO_ASSISTANT: "передачи ассистенту",
+            config.STAGE_ACCEPTED_BY_ASSISTANT: "получения от менеджера",
+            config.STAGE_TRANSFERRED_TO_OWNER: "передачи собственнику",
+            config.STAGE_ACCEPTED_BY_OWNER: "получения",
+        }
+        stage_name = stage_names.get(stage, stage)
+        message = (
+            f"📝 Подтверждение {stage_name}\n\n"
+            f"Сделка: {deal_id}\n"
+            f"Введенная сумма: {format_currency(amount)}\n\n"
+            f"Используйте кнопку подтверждения ниже:"
+        )
+        keyboard = get_amount_confirmation_keyboard(amount)
+        await update.message.reply_text(message, reply_markup=keyboard)
+        return
+    
     try:
         amount_str = update.message.text
         amount = validate_amount_string(amount_str)
